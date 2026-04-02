@@ -33,10 +33,16 @@ export interface OptimizeResponse {
   };
 }
 
+function getToken(): string {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  if (!token) throw new Error('Please sign in to use this feature');
+  return token;
+}
+
 export async function analyzeResume(latexCode: string, jobDescription: string): Promise<AnalyzeResponse> {
   const res = await fetch(`${API_BASE}/api/analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
     body: JSON.stringify({ latexCode, jobDescription }),
   });
 
@@ -51,7 +57,7 @@ export async function analyzeResume(latexCode: string, jobDescription: string): 
 export async function optimizeResume(latexCode: string, jobDescription: string): Promise<OptimizeResponse> {
   const res = await fetch(`${API_BASE}/api/optimize`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
     body: JSON.stringify({ latexCode, jobDescription }),
   });
 
@@ -66,7 +72,7 @@ export async function optimizeResume(latexCode: string, jobDescription: string):
 export async function compilePdf(latexCode: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/compile`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
     body: JSON.stringify({ latexCode }),
   });
 

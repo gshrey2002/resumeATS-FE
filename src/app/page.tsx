@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { GoogleLogin } from '@react-oauth/google';
 import LatexEditor from '@/components/LatexEditor';
 import ScoreCard from '@/components/ScoreCard';
 import KeywordBadges from '@/components/KeywordBadges';
 import SuggestionsList from '@/components/SuggestionsList';
 import LatexDiffViewer from '@/components/LatexDiffViewer';
+import LandingPage from '@/components/LandingPage';
 import { analyzeResume, optimizeResume, compilePdf, downloadBlob, saveResume } from '@/lib/api';
 import type { AnalyzeResponse, OptimizeResponse } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -48,7 +48,7 @@ Experienced software developer with expertise in building web applications.
 \\end{document}`;
 
 export default function Home() {
-  const { user, isLoggedIn, token, login, logout: rawLogout, saveDraft } = useAuth();
+  const { user, isLoggedIn, token, logout: rawLogout, saveDraft } = useAuth();
   const [latexCode, setLatexCode] = useState(SAMPLE_LATEX);
   const [jobDescription, setJobDescription] = useState('');
   const [step, setStep] = useState<Step>('input');
@@ -62,9 +62,6 @@ export default function Home() {
   const [compiling, setCompiling] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resumeName, setResumeName] = useState('');
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => { setMounted(true); }, []);
 
   // Restore draft: dashboard load > DB draft > sample
   useEffect(() => {
@@ -79,15 +76,14 @@ export default function Home() {
       return;
     }
     if (user?.draftLatex) setLatexCode(user.draftLatex);
-    if (user?.draftJobDescription) setJobDescription(user.draftJobDescription);
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save draft to DB (debounced in saveDraft)
+  // Auto-save draft LaTeX to DB (debounced in saveDraft)
   useEffect(() => {
     if (isLoggedIn && latexCode && latexCode !== SAMPLE_LATEX) {
-      saveDraft(latexCode, jobDescription);
+      saveDraft(latexCode, '');
     }
-  }, [isLoggedIn, latexCode, jobDescription, saveDraft]);
+  }, [isLoggedIn, latexCode, saveDraft]);
 
   const handleAnalyze = useCallback(async () => {
     if (!latexCode.trim() || !jobDescription.trim()) {
@@ -195,6 +191,8 @@ export default function Home() {
     reader.readAsText(file);
   }, []);
 
+  if (!isLoggedIn) return <LandingPage />;
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       {/* Header */}
@@ -215,47 +213,35 @@ export default function Home() {
                 Start Over
               </button>
             )}
-            {isLoggedIn ? (
-              <div className="flex items-center gap-3">
-                <a
-                  href="/dashboard"
-                  className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  My Resumes
-                </a>
-                <div className="flex items-center gap-2">
-                  {user?.picture ? (
-                    <img
-                      src={user.picture}
-                      alt={user.name || ''}
-                      referrerPolicy="no-referrer"
-                      className="h-8 w-8 rounded-full border border-zinc-200 dark:border-zinc-700"
-                    />
-                  ) : (
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
-                      {user?.name?.charAt(0)?.toUpperCase() || '?'}
-                    </div>
-                  )}
-                  <span className="hidden text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:inline">
-                    {user?.name?.split(' ')[0]}
-                  </span>
+            <a
+              href="/dashboard"
+              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              My Resumes
+            </a>
+            <div className="flex items-center gap-2">
+              {user?.picture ? (
+                <img
+                  src={user.picture}
+                  alt={user.name || ''}
+                  referrerPolicy="no-referrer"
+                  className="h-8 w-8 rounded-full border border-zinc-200 dark:border-zinc-700"
+                />
+              ) : (
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                  {user?.name?.charAt(0)?.toUpperCase() || '?'}
                 </div>
-                <button
-                  onClick={handleLogout}
-                  className="rounded-lg px-3 py-2 text-sm text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-                >
-                  Logout
-                </button>
-              </div>
-            ) : mounted ? (
-              <GoogleLogin
-                onSuccess={(resp) => { if (resp.credential) login(resp.credential); }}
-                onError={() => setError('Google login failed')}
-                size="medium"
-                shape="pill"
-                text="signin"
-              />
-            ) : null}
+              )}
+              <span className="hidden text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:inline">
+                {user?.name?.split(' ')[0]}
+              </span>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="rounded-lg px-3 py-2 text-sm text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+            >
+              Logout
+            </button>
           </div>
         </div>
       </header>
