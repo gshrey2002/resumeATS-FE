@@ -1,13 +1,15 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { GoogleLogin } from '@react-oauth/google';
 import LatexEditor from '@/components/LatexEditor';
 import ScoreCard from '@/components/ScoreCard';
 import KeywordBadges from '@/components/KeywordBadges';
 import SuggestionsList from '@/components/SuggestionsList';
 import LatexDiffViewer from '@/components/LatexDiffViewer';
-import { analyzeResume, optimizeResume, compilePdf, downloadBlob } from '@/lib/api';
+import { analyzeResume, optimizeResume, compilePdf, downloadBlob, saveResume } from '@/lib/api';
 import type { AnalyzeResponse, OptimizeResponse } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 type Step = 'input' | 'analyzed' | 'optimized';
 
@@ -46,16 +48,46 @@ Experienced software developer with expertise in building web applications.
 \\end{document}`;
 
 export default function Home() {
+  const { user, isLoggedIn, token, login, logout: rawLogout, saveDraft } = useAuth();
   const [latexCode, setLatexCode] = useState(SAMPLE_LATEX);
   const [jobDescription, setJobDescription] = useState('');
   const [step, setStep] = useState<Step>('input');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [saveMsg, setSaveMsg] = useState('');
 
   const [analysisResult, setAnalysisResult] = useState<AnalyzeResponse | null>(null);
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResponse | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [resumeName, setResumeName] = useState('');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
+
+  // Restore draft: dashboard load > DB draft > sample
+  useEffect(() => {
+    const raw = sessionStorage.getItem('loaded_resume');
+    if (raw) {
+      try {
+        const resume = JSON.parse(raw);
+        if (resume.latexCode) setLatexCode(resume.latexCode);
+        if (resume.lastJobDescription) setJobDescription(resume.lastJobDescription);
+      } catch { /* ignore */ }
+      sessionStorage.removeItem('loaded_resume');
+      return;
+    }
+    if (user?.draftLatex) setLatexCode(user.draftLatex);
+    if (user?.draftJobDescription) setJobDescription(user.draftJobDescription);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save draft to DB (debounced in saveDraft)
+  useEffect(() => {
+    if (isLoggedIn && latexCode && latexCode !== SAMPLE_LATEX) {
+      saveDraft(latexCode, jobDescription);
+    }
+  }, [isLoggedIn, latexCode, jobDescription, saveDraft]);
 
   const handleAnalyze = useCallback(async () => {
     if (!latexCode.trim() || !jobDescription.trim()) {
@@ -94,18 +126,20 @@ export default function Home() {
     setError('');
     try {
       const blob = await compilePdf(latex);
-      downloadBlob(blob, 'optimized-resume.pdf');
+      const fileName = resumeName.trim() || 'optimized-resume';
+      downloadBlob(blob, `${fileName}.pdf`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'PDF compilation failed');
     } finally {
       setCompiling(false);
     }
-  }, []);
+  }, [resumeName]);
 
   const handleDownloadTex = useCallback((latex: string) => {
     const blob = new Blob([latex], { type: 'application/x-tex' });
-    downloadBlob(blob, 'optimized-resume.tex');
-  }, []);
+    const fileName = resumeName.trim() || 'optimized-resume';
+    downloadBlob(blob, `${fileName}.tex`);
+  }, [resumeName]);
 
   const handleReset = useCallback(() => {
     setStep('input');
@@ -113,7 +147,42 @@ export default function Home() {
     setOptimizeResult(null);
     setShowDiff(false);
     setError('');
+    setSaveMsg('');
   }, []);
+
+  const handleLogout = useCallback(() => {
+    rawLogout();
+    setLatexCode(SAMPLE_LATEX);
+    setJobDescription('');
+    setStep('input');
+    setAnalysisResult(null);
+    setOptimizeResult(null);
+    setShowDiff(false);
+    setError('');
+    setSaveMsg('');
+    setResumeName('');
+  }, [rawLogout]);
+
+  const handleSaveResume = useCallback(async () => {
+    if (!token || !optimizeResult) return;
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      const name = resumeName.trim() || `Resume ${new Date().toLocaleDateString()}`;
+      await saveResume(token, {
+        name,
+        latexCode,
+        lastJobDescription: jobDescription,
+        lastOptimizedLatex: optimizeResult.optimizedLatex,
+        lastScore: optimizeResult.optimizedScore,
+      });
+      setSaveMsg('Saved to your profile!');
+    } catch (err) {
+      setSaveMsg(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }, [token, optimizeResult, latexCode, jobDescription, resumeName]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -137,14 +206,57 @@ export default function Home() {
             </h1>
             <p className="text-sm text-zinc-500">Free tool to tailor your LaTeX resume for any job</p>
           </div>
-          {step !== 'input' && (
-            <button
-              onClick={handleReset}
-              className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              Start Over
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {step !== 'input' && (
+              <button
+                onClick={handleReset}
+                className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Start Over
+              </button>
+            )}
+            {isLoggedIn ? (
+              <div className="flex items-center gap-3">
+                <a
+                  href="/dashboard"
+                  className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                >
+                  My Resumes
+                </a>
+                <div className="flex items-center gap-2">
+                  {user?.picture ? (
+                    <img
+                      src={user.picture}
+                      alt={user.name || ''}
+                      referrerPolicy="no-referrer"
+                      className="h-8 w-8 rounded-full border border-zinc-200 dark:border-zinc-700"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
+                      {user?.name?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                  )}
+                  <span className="hidden text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:inline">
+                    {user?.name?.split(' ')[0]}
+                  </span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="rounded-lg px-3 py-2 text-sm text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                >
+                  Logout
+                </button>
+              </div>
+            ) : mounted ? (
+              <GoogleLogin
+                onSuccess={(resp) => { if (resp.credential) login(resp.credential); }}
+                onError={() => setError('Google login failed')}
+                size="medium"
+                shape="pill"
+                text="signin"
+              />
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -330,21 +442,49 @@ export default function Home() {
               )}
             </div>
 
-            {/* Download Actions */}
-            <div className="flex justify-center gap-4">
-              <button
-                onClick={() => handleDownloadTex(optimizeResult.optimizedLatex)}
-                className="rounded-xl border border-zinc-300 bg-white px-6 py-3 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-              >
-                Download .tex
-              </button>
-              <button
-                onClick={() => handleDownloadPdf(optimizeResult.optimizedLatex)}
-                disabled={compiling}
-                className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {compiling ? 'Compiling PDF...' : 'Download PDF'}
-              </button>
+            {/* Download & Save Actions */}
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-full max-w-md">
+                <label className="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  File / Resume Name
+                </label>
+                <input
+                  type="text"
+                  value={resumeName}
+                  onChange={(e) => setResumeName(e.target.value)}
+                  placeholder="e.g. Google-SWE-Resume (optional)"
+                  className="w-full rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm text-zinc-800 placeholder-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:placeholder-zinc-500"
+                />
+              </div>
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={() => handleDownloadTex(optimizeResult.optimizedLatex)}
+                  className="rounded-xl border border-zinc-300 bg-white px-6 py-3 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  Download .tex
+                </button>
+                <button
+                  onClick={() => handleDownloadPdf(optimizeResult.optimizedLatex)}
+                  disabled={compiling}
+                  className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {compiling ? 'Compiling PDF...' : 'Download PDF'}
+                </button>
+                {isLoggedIn && (
+                  <button
+                    onClick={handleSaveResume}
+                    disabled={saving}
+                    className="rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Save to Profile'}
+                  </button>
+                )}
+              </div>
+              {saveMsg && (
+                <p className={`text-sm font-medium ${saveMsg.includes('Saved') ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {saveMsg}
+                </p>
+              )}
             </div>
           </div>
         )}

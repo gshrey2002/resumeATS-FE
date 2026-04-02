@@ -86,3 +86,73 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/* ---- Resume CRUD (requires auth) ---- */
+
+export interface SavedResumeSummary {
+  _id: string;
+  name: string;
+  lastScore: number | null;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface SavedResumeDetail extends SavedResumeSummary {
+  latexCode: string;
+  lastJobDescription: string;
+  lastOptimizedLatex: string;
+}
+
+function authHeaders(token: string): Record<string, string> {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+}
+
+export async function listResumes(token: string): Promise<SavedResumeSummary[]> {
+  const res = await fetch(`${API_BASE}/api/resumes`, { headers: authHeaders(token) });
+  if (!res.ok) throw new Error('Failed to load resumes');
+  return res.json();
+}
+
+export async function getResume(token: string, id: string): Promise<SavedResumeDetail> {
+  const res = await fetch(`${API_BASE}/api/resumes/${id}`, { headers: authHeaders(token) });
+  if (!res.ok) throw new Error('Failed to load resume');
+  return res.json();
+}
+
+export async function saveResume(
+  token: string,
+  data: { name: string; latexCode: string; lastJobDescription?: string; lastOptimizedLatex?: string; lastScore?: number }
+): Promise<SavedResumeDetail> {
+  const res = await fetch(`${API_BASE}/api/resumes`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || 'Failed to save resume');
+  }
+  return res.json();
+}
+
+export async function updateResume(
+  token: string,
+  id: string,
+  data: Partial<{ name: string; latexCode: string; lastJobDescription: string; lastOptimizedLatex: string; lastScore: number }>
+): Promise<SavedResumeDetail> {
+  const res = await fetch(`${API_BASE}/api/resumes/${id}`, {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update resume');
+  return res.json();
+}
+
+export async function deleteResume(token: string, id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/resumes/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) throw new Error('Failed to delete resume');
+}
